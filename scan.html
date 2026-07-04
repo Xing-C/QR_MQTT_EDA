@@ -13,22 +13,25 @@ video{width:100%;max-width:400px;border-radius:10px}
 .ok{color:#4ade80}.wait{color:#94a3b8}
 button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:13px;margin:6px 4px;cursor:pointer}
 .btn-cancel{background:#6b7280}
+.btn-torch{background:#7c3aed}
 .status{color:#94a3b8;font-size:11px;margin-top:6px}
 .actions{display:none;margin-top:8px}
+.toolbar{display:none;justify-content:center;gap:8px;margin-top:6px}
 </style>
 </head>
 <body>
 <h2>📷 扫码</h2>
 <video id="v" autoplay playsinline></video>
-<canvas id="c" hidden></canvas>
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
+<div class="toolbar" id="toolbar">
+<button id="btn-torch" class="btn-torch">💡 闪光灯</button>
+</div>
 <div class="actions" id="actions">
 <button id="btn-send">✓ 推送</button>
 <button id="btn-cancel" class="btn-cancel">✕ 取消</button>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.0.3/dist/jsQR.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mqtt@4.3.8/dist/mqtt.min.js"></script>
 <script>
 var params = new URLSearchParams(location.search);
@@ -38,10 +41,12 @@ var broker = 'wss://broker.emqx.io:8084/mqtt';
 var lastData = '';
 var scanTimer = null;
 var paused = false;
+var torchOn = false;
 
 var mqttClient = mqtt.connect(broker);
 mqttClient.on('connect', function () {
     document.getElementById('status').textContent = '已连接 ✓';
+    document.getElementById('toolbar').style.display = 'flex';
     startCamera();
 });
 
@@ -61,78 +66,98 @@ function playBeep() {
     } catch (e) {}
 }
 
+function toggleTorch() {
+    var v = document.getElementById('v');
+    if (!v || !v.srcObject) return;
+    var track = v.srcObject.getVideoTracks()[0];
+    if (!track || !track.applyConstraints) return;
+    torchOn = !torchOn;
+    track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function() {});
+    document.getElementById('btn-torch').textContent = torchOn ? '💡 关闭' : '💡 闪光灯';
+}
+
+function onCodeFound(codeData) {
+    if (codeData === lastData) return;
+    lastData = codeData;
+
+    if (/\/scan\.html(\?|$)/.test(codeData)) {
+        document.getElementById('status').textContent = '检测到新设备ID 已跳转';
+        document.getElementById('r').innerHTML = '跳转中...';
+        setTimeout(function() { window.location.href = codeData; }, 500);
+        return;
+    }
+
+    playBeep();
+    paused = true;
+    document.getElementById('v').style.opacity = '0.3';
+    var r = document.getElementById('r');
+    r.className = 'ok';
+    r.innerHTML = codeData;
+
+    document.getElementById('btn-send').onclick = function() {
+        if (deviceId) {
+            mqttClient.publish(topic, JSON.stringify({ type: 'SCAN_RESULT', content: codeData }));
+        }
+        document.getElementById('status').textContent = '已发送 ✓';
+        document.getElementById('actions').style.display = 'none';
+        r.className = 'wait';
+        r.innerHTML = '已发送，等待下一次扫码...';
+        setTimeout(function() {
+            paused = false;
+            document.getElementById('v').style.opacity = '1';
+            lastData = '';
+            r.innerHTML = '等待扫码...';
+            document.getElementById('status').textContent = '扫码中...';
+        }, 1000);
+    };
+
+    document.getElementById('btn-cancel').onclick = function() {
+        document.getElementById('actions').style.display = 'none';
+        paused = false;
+        document.getElementById('v').style.opacity = '1';
+        lastData = '';
+        r.innerHTML = '等待扫码...';
+    };
+
+    document.getElementById('actions').style.display = 'block';
+}
+
 function startCamera() {
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 480 } })
-    .then(function(s) {
-        var v = document.getElementById('v');
-        var c = document.getElementById('c');
-        var ctx = c.getContext('2d');
-        var r = document.getElementById('r');
-        var actions = document.getElementById('actions');
-        var btnSend = document.getElementById('btn-send');
-        var btnCancel = document.getElementById('btn-cancel');
-        v.srcObject = s;
-        v.play();
+    // 检查 BarcodeDetector 是否支持 QR 码
+    if (!window.BarcodeDetector || !window.BarcodeDetector.getSupportedFormats) {
+        document.getElementById('r').textContent = '当前浏览器不支持扫码，请使用 Chrome 或 Edge';
+        document.getElementById('status').textContent = '不支持的浏览器';
+        return;
+    }
 
-        scanTimer = setInterval(function() {
-            if (paused || v.readyState !== v.HAVE_ENOUGH_DATA) return;
-            c.width = v.videoWidth;
-            c.height = v.videoHeight;
-            ctx.drawImage(v, 0, 0);
-            var img = ctx.getImageData(0, 0, c.width, c.height);
-            var code = jsQR(img.data, img.width, img.height);
-            if (code && code.data !== lastData) {
-                lastData = code.data;
-                
-                // 检测是否包含 /scan.html（另一个设备的 QR 码），自动跳转
-                if (/\/scan\.html(\?|$)/.test(code.data)) {
-                    document.getElementById('status').textContent = '检测到新设备ID 已跳转';
-                    document.getElementById('r').innerHTML = '跳转中...';
-                    setTimeout(function() { window.location.href = code.data; }, 500);
-                    return;
-                }
-                
-                playBeep();
-                paused = true;
-                v.style.opacity = '0.3';
-                r.className = 'ok';
-                r.innerHTML = code.data;
+    window.BarcodeDetector.getSupportedFormats().then(function(fmts) {
+        if (fmts.indexOf('qr_code') < 0) {
+            document.getElementById('r').textContent = '当前浏览器不支持 QR 码扫描';
+            document.getElementById('status').textContent = '不支持的浏览器';
+            return;
+        }
 
-                btnSend.onclick = function() {
-                    if (deviceId) {
-                        mqttClient.publish(topic, JSON.stringify({
-                            type: 'SCAN_RESULT',
-                            content: code.data
-                        }));
-                    }
-                    document.getElementById('status').textContent = '已发送 ✓';
-                    actions.style.display = 'none';
-                    r.className = 'wait';
-                    r.innerHTML = '已发送，等待下一次扫码...';
-                    setTimeout(function() {
-                        paused = false;
-                        v.style.opacity = '1';
-                        lastData = '';
-                        r.innerHTML = '等待扫码...';
-                        document.getElementById('status').textContent = '扫码中...';
-                    }, 1000);
-                };
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 320 } })
+        .then(function(s) {
+            var v = document.getElementById('v');
+            v.srcObject = s;
+            v.play();
+            document.getElementById('btn-torch').onclick = toggleTorch;
 
-                btnCancel.onclick = function() {
-                    actions.style.display = 'none';
-                    paused = false;
-                    v.style.opacity = '1';
-                    lastData = '';
-                    r.innerHTML = '等待扫码...';
-                };
+            var detector = new BarcodeDetector({ formats: ['qr_code'] });
+            document.getElementById('status').textContent = '扫码中...';
 
-                actions.style.display = 'block';
-            }
-        }, 800);
-    })
-    .catch(function(e) {
-        document.getElementById('r').textContent = '摄像头错误: ' + e.message;
-        document.getElementById('status').textContent = '错误';
+            scanTimer = setInterval(function() {
+                if (paused || v.readyState < 2) return;
+                detector.detect(v).then(function(codes) {
+                    if (codes.length > 0) onCodeFound(codes[0].rawValue);
+                }).catch(function() {});
+            }, 200);
+        })
+        .catch(function(e) {
+            document.getElementById('r').textContent = '摄像头错误: ' + e.message;
+            document.getElementById('status').textContent = '错误';
+        });
     });
 }
 </script>
