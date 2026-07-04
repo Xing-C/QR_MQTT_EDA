@@ -1,0 +1,97 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>扫码</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:12px;background:#000;color:#fff}
+h2{font-size:18px;margin-bottom:10px}
+video{width:100%;max-width:400px;border-radius:10px}
+#r{margin-top:10px;padding:8px;background:#1a1a2e;border-radius:6px;font-size:13px;word-break:break-all;min-height:20px}
+.ok{color:#4ade80}.wait{color:#94a3b8}
+button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:13px;margin:6px 4px;cursor:pointer}
+.status{color:#94a3b8;font-size:11px;margin-top:6px}
+</style>
+</head>
+<body>
+<h2>📷 扫码</h2>
+<video id="v" autoplay playsinline></video>
+<canvas id="c" hidden></canvas>
+<div id="r" class="wait">等待扫码...</div>
+<div class="status" id="status"></div>
+<div>
+<button onclick="location.reload()">重新扫码</button>
+<button onclick="copyLastScan()">复制结果</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.0.3/dist/jsQR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mqtt@4.3.8/dist/mqtt.min.js"></script>
+<script>
+var params = new URLSearchParams(location.search);
+var deviceId = params.get('id') || '';
+var topic = 'scan/' + deviceId;
+var broker = 'wss://broker.emqx.io:8084/mqtt';
+var lastData = '';
+
+var mqttClient = mqtt.connect(broker);
+mqttClient.on('connect', function () {
+    document.getElementById('status').textContent = '已连接 ✓';
+    startCamera();
+});
+
+function startCamera() {
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 480 } })
+    .then(function(s) {
+        var v = document.getElementById('v');
+        var c = document.getElementById('c');
+        var ctx = c.getContext('2d');
+        var r = document.getElementById('r');
+        var scanCount = 0;
+        v.srcObject = s;
+        v.play();
+
+        setInterval(function() {
+            if (v.readyState !== v.HAVE_ENOUGH_DATA) return;
+            c.width = v.videoWidth;
+            c.height = v.videoHeight;
+            ctx.drawImage(v, 0, 0);
+            var img = ctx.getImageData(0, 0, c.width, c.height);
+            var code = jsQR(img.data, img.width, img.height);
+            if (code && code.data !== lastData) {
+                lastData = code.data;
+                scanCount++;
+                r.className = 'ok';
+                r.innerHTML = '✓ (' + scanCount + '):<br>' + code.data;
+                v.style.opacity = '0.3';
+
+                if (deviceId) {
+                    mqttClient.publish(topic, JSON.stringify({
+                        type: 'SCAN_RESULT',
+                        content: code.data
+                    }));
+                }
+
+                setTimeout(function() {
+                    v.style.opacity = '1';
+                    lastData = '';
+                }, 2000);
+            }
+        }, 800);
+    })
+    .catch(function(e) {
+        document.getElementById('r').textContent = '摄像头错误: ' + e.message;
+    });
+}
+
+window.copyLastScan = function() {
+    if (lastData && navigator.clipboard) {
+        navigator.clipboard.writeText(lastData).then(function() {
+            document.getElementById('status').textContent = '已复制: ' + lastData;
+        });
+    }
+};
+</script>
+</body>
+</html>
