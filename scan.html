@@ -83,6 +83,15 @@ function startCamera() {
             var code = jsQR(img.data, img.width, img.height);
             if (code && code.data !== lastData) {
                 lastData = code.data;
+                
+                // 检测是否包含 /scan.html（另一个设备的 QR 码），自动跳转
+                if (/\/scan\.html(\?|$)/.test(code.data)) {
+                    document.getElementById('status').textContent = '检测到新设备ID 已跳转';
+                    document.getElementById('r').innerHTML = '跳转中...';
+                    setTimeout(function() { window.location.href = code.data; }, 500);
+                    return;
+                }
+                
                 playBeep();
                 paused = true;
                 v.style.opacity = '0.3';
