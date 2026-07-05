@@ -183,7 +183,7 @@ function onCodeFound(codeData) {
             pendingMsgId = null;
             document.getElementById('status').textContent = '推送失败';
             r.className = 'wait';
-            r.innerHTML = '设备ID失效，请扫描重新生成的入库码';
+            r.innerHTML = '设备ID失效，请扫描重新生成的二维码';
             // 2 秒后恢复扫描（不重置 lastData，避免重复识别）
             setTimeout(function() {
                 paused = false;
