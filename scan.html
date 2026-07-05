@@ -18,8 +18,9 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 .btn-cancel{background:#6b7280}
 .toolbar label{color:#94a3b8;font-size:11px}
 .toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:11px;outline:none}
-.actions-wrap{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:16px 0}
+.actions-wrap{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:8px 0;gap:8px}
 .actions{display:none;gap:16px}
+.btn-snap{display:none;background:#7c3aed;padding:8px 20px;font-size:13px;min-width:auto}
 .zoom-bar{display:none;justify-content:center;gap:8px;padding:8px 0;flex-shrink:0}
 .zoom-btn{background:#333;color:#aaa;border:1px solid #555;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;min-width:48px}
 .zoom-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
@@ -34,6 +35,7 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
 <div class="actions-wrap">
+<button id="btn-snap" class="btn-snap">📸 拍照识别</button>
 <div class="actions" id="actions">
 <button id="btn-send">✓ 推送</button>
 <button id="btn-cancel" class="btn-cancel">✕ 取消</button>
@@ -130,11 +132,11 @@ mqttClient.on('message', function(t, msg) {
 });
 
 // 从视频抓一帧交给 zxing-wasm 解码
-function grabAndScan() {
+function grabAndScan(cb) {
     var v = document.getElementById('v');
     var c = document.getElementById('c');
     var ctx = c.getContext('2d');
-    if (v.readyState < 2) return;
+    if (v.readyState < 2) { if (cb) cb(false); return; }
     var outW = Math.min(v.videoWidth, 320);
     var outH = Math.round(outW * v.videoHeight / v.videoWidth);
     if (zoom > 1) {
@@ -150,9 +152,11 @@ function grabAndScan() {
     }
     var img = ctx.getImageData(0, 0, c.width, c.height);
     ZXingWASM.readBarcodes(img, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
-        if (res.length > 0) onCodeFound(res[0].text);
+        if (res.length > 0) { onCodeFound(res[0].text); if (cb) cb(true); }
+        else { if (cb) cb(false); }
     }).catch(function(err) {
         console.log('[ZXing]', err);
+        if (cb) cb(false);
     });
 }
 
@@ -265,13 +269,26 @@ function onCodeFound(codeData) {
 }
 
 function startCamera() {
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 800 }, height: { ideal: 600 } } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
     .then(function(s) {
         var v = document.getElementById('v');
         v.srcObject = s;
         v.play();
 
         document.getElementById('status').textContent = '扫码中...';
+        document.getElementById('btn-snap').style.display = '';
+        document.getElementById('btn-snap').onclick = function() {
+            paused = true;
+            document.getElementById('status').textContent = '识别中...';
+            setTimeout(function() {
+                grabAndScan(function(found) {
+                    if (!found) {
+                        paused = false;
+                        document.getElementById('status').textContent = '扫码中...';
+                    }
+                });
+            }, 200);
+        };
 
         scanTimer = setInterval(function() {
             if (paused || v.readyState < 2) return;
