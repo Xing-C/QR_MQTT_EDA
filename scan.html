@@ -100,19 +100,19 @@ mqttClient.on('message', function(t, msg) {
         if (m.type === 'ACK' && m.msgId === pendingMsgId) {
             clearTimeout(ackTimer);
             pendingMsgId = null;
-            // ACK 收到，推送成功
             var r = document.getElementById('r');
             document.getElementById('status').textContent = '已发送 ✓';
             document.getElementById('actions').style.display = 'none';
-            r.className = 'wait';
+            r.className = 'ok';
             r.innerHTML = '推送成功 ✓';
+            // 1.5 秒后恢复扫描（不重置 lastData，避免重复识别同一码）
             setTimeout(function() {
                 paused = false;
                 document.getElementById('v').style.opacity = '1';
-                lastData = '';
-                r.innerHTML = '等待扫码...';
                 document.getElementById('status').textContent = '扫码中...';
-            }, 100);
+                r.innerHTML = '等待扫码...';
+                r.className = 'wait';
+            }, 1500);
         }
     } catch(e) {}
 });
@@ -182,14 +182,15 @@ function onCodeFound(codeData) {
         ackTimer = setTimeout(function() {
             pendingMsgId = null;
             document.getElementById('status').textContent = '推送失败';
+            r.className = 'wait';
             r.innerHTML = '设备ID失效，请扫描重新生成的入库码';
+            // 2 秒后恢复扫描（不重置 lastData，避免重复识别）
             setTimeout(function() {
                 paused = false;
                 document.getElementById('v').style.opacity = '1';
-                lastData = '';
-                r.innerHTML = '等待扫码...';
                 document.getElementById('status').textContent = '扫码中...';
-            }, 100);
+                r.innerHTML = '等待扫码...';
+            }, 2000);
         }, 5000);
     };
 
@@ -200,7 +201,7 @@ function onCodeFound(codeData) {
             document.getElementById('v').style.opacity = '1';
             lastData = '';
             r.innerHTML = '等待扫码...';
-        }, 100);
+        }, 500);
     };
 
     document.getElementById('actions').style.display = 'block';
