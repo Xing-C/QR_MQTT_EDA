@@ -23,8 +23,11 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:
 </head>
 <body>
 <h2>📷 扫码</h2>
-<video id="v" autoplay playsinline></video>
+<div style="position:relative;display:inline-block;width:100%;max-width:400px">
+<video id="v" autoplay playsinline style="width:100%;border-radius:10px;display:block"></video>
 <canvas id="c" hidden></canvas>
+<div id="crop-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border:2px solid rgba(74,222,128,0.6);border-radius:10px;display:none;box-sizing:border-box"></div>
+</div>
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
 <div class="toolbar" id="toolbar">
@@ -99,14 +102,33 @@ mqttClient.on('connect', function () {
     sel.onchange = function() {
         scanW = parseInt(this.value);
         localStorage.setItem('scanW', '' + scanW);
+        document.getElementById('status').textContent = '画幅: ' + scanW + 'px';
     };
     var zsel = document.getElementById('zoom-select');
     zsel.value = '' + zoom;
     zsel.onchange = function() {
         zoom = parseFloat(this.value);
         localStorage.setItem('zoom', '' + zoom);
+        updateCropOverlay();
+        document.getElementById('status').textContent = '变焦: ' + zoom + 'x';
     };
+    updateCropOverlay();
     tryStart();
+
+function updateCropOverlay() {
+    var ov = document.getElementById('crop-overlay');
+    if (zoom > 1.0) {
+        ov.style.display = 'block';
+        var pct = 100 / zoom;
+        var margin = (100 - pct) / 2;
+        ov.style.top = margin + '%';
+        ov.style.left = margin + '%';
+        ov.style.width = pct + '%';
+        ov.style.height = pct + '%';
+    } else {
+        ov.style.display = 'none';
+    }
+}
 });
 
 // 变焦裁剪: 取画面中心区域并放大，等同数码变焦
@@ -216,7 +238,7 @@ function onCodeFound(codeData) {
 }
 
 function startCamera() {
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 320 } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } })
     .then(function(s) {
         var v = document.getElementById('v');
         v.srcObject = s;
