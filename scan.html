@@ -22,6 +22,7 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:
 <body>
 <h2>📷 扫码</h2>
 <video id="v" autoplay playsinline></video>
+<canvas id="c" hidden></canvas>
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
 <div class="toolbar" id="toolbar">
@@ -32,6 +33,7 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:
 <button id="btn-cancel" class="btn-cancel">✕ 取消</button>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.0/dist/iife/reader/index.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mqtt@4.3.8/dist/mqtt.min.js"></script>
 <script>
 var params = new URLSearchParams(location.search);
@@ -123,41 +125,31 @@ function onCodeFound(codeData) {
 }
 
 function startCamera() {
-    // 检查 BarcodeDetector 是否支持 QR 码
-    if (!window.BarcodeDetector || !window.BarcodeDetector.getSupportedFormats) {
-        document.getElementById('r').textContent = '当前浏览器不支持扫码，请使用 Chrome 或 Edge';
-        document.getElementById('status').textContent = '不支持的浏览器';
-        return;
-    }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 320 } })
+    .then(function(s) {
+        var v = document.getElementById('v');
+        var c = document.getElementById('c');
+        var ctx = c.getContext('2d');
+        v.srcObject = s;
+        v.play();
 
-    window.BarcodeDetector.getSupportedFormats().then(function(fmts) {
-        if (fmts.indexOf('qr_code') < 0) {
-            document.getElementById('r').textContent = '当前浏览器不支持 QR 码扫描';
-            document.getElementById('status').textContent = '不支持的浏览器';
-            return;
-        }
+        document.getElementById('btn-torch').onclick = toggleTorch;
+        document.getElementById('status').textContent = '扫码中...';
 
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 320 } })
-        .then(function(s) {
-            var v = document.getElementById('v');
-            v.srcObject = s;
-            v.play();
-            document.getElementById('btn-torch').onclick = toggleTorch;
-
-            var detector = new BarcodeDetector({ formats: ['qr_code'] });
-            document.getElementById('status').textContent = '扫码中...';
-
-            scanTimer = setInterval(function() {
-                if (paused || v.readyState < 2) return;
-                detector.detect(v).then(function(codes) {
-                    if (codes.length > 0) onCodeFound(codes[0].rawValue);
-                }).catch(function() {});
-            }, 200);
-        })
-        .catch(function(e) {
-            document.getElementById('r').textContent = '摄像头错误: ' + e.message;
-            document.getElementById('status').textContent = '错误';
-        });
+        scanTimer = setInterval(function() {
+            if (paused || v.readyState < 2) return;
+            c.width = Math.min(v.videoWidth, 320);
+            c.height = Math.round(c.width * v.videoHeight / v.videoWidth);
+            ctx.drawImage(v, 0, 0, c.width, c.height);
+            var img = ctx.getImageData(0, 0, c.width, c.height);
+            ZXingWASM.readBarcodes(img, { formats: ['QRCode'] }).then(function(res) {
+                if (res.length > 0) onCodeFound(res[0].text);
+            }).catch(function() {});
+        }, 50);
+    })
+    .catch(function(e) {
+        document.getElementById('r').textContent = '摄像头错误: ' + e.message;
+        document.getElementById('status').textContent = '错误';
     });
 }
 </script>
