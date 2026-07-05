@@ -73,9 +73,6 @@ function tryStart() {
 }
 
 var mqttClient = mqtt.connect(broker, { connectTimeout: 10000 });
-var ackTopic = 'scan/' + deviceId + '/ack';
-var pendingMsgId = null;
-var ackTimer = null;
 
 var mqttTimeout = setTimeout(function() {
     if (!mqttReady) {
@@ -118,6 +115,7 @@ mqttClient.on('message', function(t, msg) {
             }, 100);
         }
     } catch(e) {}
+});
 
 // 从视频抓一帧交给 zxing-wasm 解码
 function grabAndScan() {
