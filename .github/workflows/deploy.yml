@@ -19,7 +19,7 @@ jobs:
       - name: Upload to Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./scan.html
+          path: .
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
