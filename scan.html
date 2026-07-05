@@ -23,7 +23,7 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 </style>
 </head>
 <body>
-<h2>扫码</h2>
+<h2>📷 扫码</h2>
 <div class="video-wrap">
 <video id="v" autoplay playsinline></video>
 <canvas id="c" hidden></canvas>
@@ -105,14 +105,15 @@ mqttClient.on('message', function(t, msg) {
             document.getElementById('actions').style.display = 'none';
             r.className = 'ok';
             r.innerHTML = '推送成功 ✓';
-            // 1.5 秒后恢复扫描（不重置 lastData，避免重复识别同一码）
+            // 1 秒后恢复扫描，允许重新扫同一个码
             setTimeout(function() {
                 paused = false;
+                lastData = '';
                 document.getElementById('v').style.opacity = '1';
                 document.getElementById('status').textContent = '扫码中...';
                 r.innerHTML = '等待扫码...';
                 r.className = 'wait';
-            }, 1500);
+            }, 1000);
         }
     } catch(e) {}
 });
