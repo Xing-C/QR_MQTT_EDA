@@ -187,6 +187,7 @@ function onCodeFound(codeData) {
             // 2 秒后恢复扫描（不重置 lastData，避免重复识别）
             setTimeout(function() {
                 paused = false;
+                lastData = '';
                 document.getElementById('v').style.opacity = '1';
                 document.getElementById('status').textContent = '扫码中...';
                 r.innerHTML = '等待扫码...';
