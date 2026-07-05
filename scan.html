@@ -6,25 +6,28 @@
 <title>扫码</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:12px;background:#000;color:#fff}
-h2{font-size:18px;margin-bottom:10px}
-video{width:100%;max-width:400px;border-radius:10px}
-#r{margin-top:10px;padding:8px;background:#1a1a2e;border-radius:6px;font-size:13px;word-break:break-all;min-height:20px}
+html,body{height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:0 12px 0;background:#000;color:#fff;display:flex;flex-direction:column}
+h2{font-size:16px;padding:10px 0 4px;flex-shrink:0}
+.video-wrap{position:relative;width:100%;max-width:400px;margin:0 auto;flex-shrink:0}
+video{width:100%;max-height:45vh;border-radius:8px;display:block}
+#r{margin:6px 0;padding:6px 8px;background:#1a1a2e;border-radius:6px;font-size:12px;word-break:break-all;min-height:24px;flex-shrink:0}
 .ok{color:#4ade80}.wait{color:#94a3b8}
-button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:6px;font-size:13px;margin:6px 4px;cursor:pointer}
+.status{color:#94a3b8;font-size:10px;margin:0 0 4px;flex-shrink:0}
+button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;min-width:72px}
 .btn-cancel{background:#6b7280}
-.btn-torch{background:#7c3aed}
-.status{color:#94a3b8;font-size:11px;margin-top:6px}
-.actions{display:none;margin-top:8px}
-.toolbar{display:none;justify-content:center;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap}
+.btn-torch{background:#7c3aed;padding:6px 12px;font-size:12px;min-width:auto}
+.toolbar{display:none;justify-content:center;align-items:center;gap:6px;margin:2px 0;flex-wrap:wrap;flex-shrink:0}
 .toolbar label{color:#94a3b8;font-size:11px}
-.toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:4px 6px;font-size:11px;outline:none}
+.toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:11px;outline:none}
+.actions-wrap{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:16px 0}
+.actions{display:none;gap:16px}
 </style>
 </head>
 <body>
 <h2>📷 扫码</h2>
-<div style="position:relative;display:inline-block;width:100%;max-width:400px">
-<video id="v" autoplay playsinline style="width:100%;border-radius:10px;display:block"></video>
+<div class="video-wrap">
+<video id="v" autoplay playsinline></video>
 <canvas id="c" hidden></canvas>
 <div id="crop-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border:2px solid rgba(74,222,128,0.6);border-radius:10px;display:none;box-sizing:border-box"></div>
 </div>
@@ -50,9 +53,11 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:
 </select>
 </label>
 </div>
+<div class="actions-wrap">
 <div class="actions" id="actions">
 <button id="btn-send">✓ 推送</button>
 <button id="btn-cancel" class="btn-cancel">✕ 取消</button>
+</div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.0/dist/iife/reader/index.js"></script>
