@@ -10,7 +10,7 @@ html,body{height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:0 12px 0;background:#000;color:#fff;display:flex;flex-direction:column}
 h2{font-size:16px;padding:10px 0 4px;flex-shrink:0}
 .video-wrap{position:relative;width:100%;max-width:400px;margin:0 auto;flex-shrink:0}
-video{width:100%;max-width:400px;max-height:60vh;border-radius:8px;display:block}
+video{width:100%;max-width:400px;max-height:60vh;border-radius:8px;display:block;transition:transform .2s}
 #r{margin:6px 0;padding:6px 8px;background:#1a1a2e;border-radius:6px;font-size:12px;word-break:break-all;min-height:24px;flex-shrink:0}
 .ok{color:#4ade80}.wait{color:#94a3b8}
 .status{color:#94a3b8;font-size:10px;margin:0 0 4px;flex-shrink:0}
@@ -20,6 +20,9 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 .toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:11px;outline:none}
 .actions-wrap{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:16px 0}
 .actions{display:none;gap:16px}
+.zoom-bar{display:none;justify-content:center;gap:8px;padding:8px 0;flex-shrink:0}
+.zoom-btn{background:#333;color:#aaa;border:1px solid #555;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;min-width:48px}
+.zoom-btn.active{background:#2563eb;color:#fff;border-color:#2563eb}
 </style>
 </head>
 <body>
@@ -35,6 +38,11 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 <button id="btn-send">✓ 推送</button>
 <button id="btn-cancel" class="btn-cancel">✕ 取消</button>
 </div>
+</div>
+<div class="zoom-bar" id="zoom-bar">
+<button class="zoom-btn active" data-zoom="1">1x</button>
+<button class="zoom-btn" data-zoom="2">2x</button>
+<button class="zoom-btn" data-zoom="3">3x</button>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/zxing-wasm@3.1.0/dist/iife/reader/index.js"></script>
@@ -52,6 +60,7 @@ var pendingMsgId = null;
 var ackTimer = null;
 var mqttReady = false;
 var zxingReady = false;
+var zoom = parseFloat(localStorage.getItem('scanZoom') || '1');
 
 function waitZxing() {
     if (typeof ZXingWASM !== 'undefined' && typeof ZXingWASM.readBarcodes === 'function') {
@@ -85,6 +94,8 @@ mqttClient.on('connect', function () {
     mqttReady = true;
     document.getElementById('status').textContent = zxingReady ? '扫码中...' : 'MQTT 已连接';
     mqttClient.subscribe(ackTopic);
+    // 初始化变焦
+    setupZoom();
     tryStart();
 });
 mqttClient.on('error', function() {
@@ -124,15 +135,59 @@ function grabAndScan() {
     var c = document.getElementById('c');
     var ctx = c.getContext('2d');
     if (v.readyState < 2) return;
-    c.width = Math.min(v.videoWidth, 320);
-    c.height = Math.round(c.width * v.videoHeight / v.videoWidth);
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    var outW = Math.min(v.videoWidth, 320);
+    var outH = Math.round(outW * v.videoHeight / v.videoWidth);
+    if (zoom > 1) {
+        var cropW = Math.round(v.videoWidth / zoom);
+        var cropH = Math.round(v.videoHeight / zoom);
+        var sx = Math.round((v.videoWidth - cropW) / 2);
+        var sy = Math.round((v.videoHeight - cropH) / 2);
+        c.width = outW; c.height = outH;
+        ctx.drawImage(v, sx, sy, cropW, cropH, 0, 0, outW, outH);
+    } else {
+        c.width = outW; c.height = outH;
+        ctx.drawImage(v, 0, 0, outW, outH);
+    }
     var img = ctx.getImageData(0, 0, c.width, c.height);
     ZXingWASM.readBarcodes(img, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
         if (res.length > 0) onCodeFound(res[0].text);
     }).catch(function(err) {
         console.log('[ZXing]', err);
     });
+}
+
+function setupZoom() {
+    var bar = document.getElementById('zoom-bar');
+    bar.style.display = 'flex';
+    var btns = bar.querySelectorAll('.zoom-btn');
+    // 恢复记忆
+    btns.forEach(function(b) {
+        if (parseFloat(b.getAttribute('data-zoom')) === zoom) b.classList.add('active');
+        else b.classList.remove('active');
+    });
+    btns.forEach(function(b) {
+        b.onclick = function() {
+            zoom = parseFloat(this.getAttribute('data-zoom'));
+            localStorage.setItem('scanZoom', '' + zoom);
+            btns.forEach(function(x) { x.classList.remove('active'); });
+            this.classList.add('active');
+            applyZoomDisplay();
+        };
+    });
+    applyZoomDisplay();
+}
+
+function applyZoomDisplay() {
+    var v = document.getElementById('v');
+    if (zoom > 1) {
+        var s = zoom;
+        v.style.transform = 'scale(' + s + ')';
+        v.style.transformOrigin = 'center center';
+        v.parentElement.style.overflow = 'hidden';
+    } else {
+        v.style.transform = 'scale(1)';
+        v.parentElement.style.overflow = '';
+    }
 }
 
 function playBeep() {
