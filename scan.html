@@ -10,7 +10,7 @@ html,body{height:100%}
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;text-align:center;padding:0 12px 0;background:#000;color:#fff;display:flex;flex-direction:column}
 h2{font-size:16px;padding:10px 0 4px;flex-shrink:0}
 .video-wrap{position:relative;width:100%;max-width:400px;margin:0 auto;flex-shrink:0}
-video{width:100%;max-height:45vh;border-radius:8px;display:block}
+video{width:100%;max-width:400px;max-height:60vh;border-radius:8px;display:block;aspect-ratio:1/1;object-fit:cover}
 #r{margin:6px 0;padding:6px 8px;background:#1a1a2e;border-radius:6px;font-size:12px;word-break:break-all;min-height:24px;flex-shrink:0}
 .ok{color:#4ade80}.wait{color:#94a3b8}
 .status{color:#94a3b8;font-size:10px;margin:0 0 4px;flex-shrink:0}
@@ -78,6 +78,10 @@ function tryStart() {
 }
 
 var mqttClient = mqtt.connect(broker, { connectTimeout: 10000 });
+var ackTopic = 'scan/' + deviceId + '/ack';
+var pendingMsgId = null;
+var ackTimer = null;
+
 var mqttTimeout = setTimeout(function() {
     if (!mqttReady) {
         document.getElementById('r').textContent = 'MQTT 连接超时，请检查网络后刷新页面';
@@ -88,6 +92,7 @@ mqttClient.on('connect', function () {
     clearTimeout(mqttTimeout);
     mqttReady = true;
     document.getElementById('status').textContent = zxingReady ? '扫码中...' : 'MQTT 已连接';
+    mqttClient.subscribe(ackTopic);
     tryStart();
 });
 mqttClient.on('error', function() {
@@ -97,6 +102,27 @@ mqttClient.on('error', function() {
         document.getElementById('status').textContent = '连接失败';
     }
 });
+mqttClient.on('message', function(t, msg) {
+    try {
+        var m = JSON.parse(msg.toString());
+        if (m.type === 'ACK' && m.msgId === pendingMsgId) {
+            clearTimeout(ackTimer);
+            pendingMsgId = null;
+            // ACK 收到，推送成功
+            var r = document.getElementById('r');
+            document.getElementById('status').textContent = '已发送 ✓';
+            document.getElementById('actions').style.display = 'none';
+            r.className = 'wait';
+            r.innerHTML = '推送成功 ✓';
+            setTimeout(function() {
+                paused = false;
+                document.getElementById('v').style.opacity = '1';
+                lastData = '';
+                r.innerHTML = '等待扫码...';
+                document.getElementById('status').textContent = '扫码中...';
+            }, 100);
+        }
+    } catch(e) {}
 
 // 从视频抓一帧交给 zxing-wasm 解码
 function grabAndScan() {
@@ -151,19 +177,27 @@ function onCodeFound(codeData) {
 
     document.getElementById('btn-send').onclick = function() {
         if (deviceId) {
-            mqttClient.publish(topic, JSON.stringify({ type: 'SCAN_RESULT', content: codeData }));
+            pendingMsgId = 'm' + Date.now() + '' + Math.random().toString(36).substring(2, 6);
+            mqttClient.publish(topic, JSON.stringify({ type: 'SCAN_RESULT', content: codeData, msgId: pendingMsgId }));
         }
-        document.getElementById('status').textContent = '已发送 ✓';
+        document.getElementById('status').textContent = '等待确认...';
         document.getElementById('actions').style.display = 'none';
         r.className = 'wait';
-        r.innerHTML = '已发送，等待下一次扫码...';
-        setTimeout(function() {
-            paused = false;
-            document.getElementById('v').style.opacity = '1';
-            lastData = '';
-            r.innerHTML = '等待扫码...';
-            document.getElementById('status').textContent = '扫码中...';
-        }, 100);
+        r.innerHTML = '等待插件确认...';
+
+        // 5秒超时未收到 ACK
+        ackTimer = setTimeout(function() {
+            pendingMsgId = null;
+            document.getElementById('status').textContent = '推送失败';
+            r.innerHTML = '设备ID失效，请扫描重新生成的入库码';
+            setTimeout(function() {
+                paused = false;
+                document.getElementById('v').style.opacity = '1';
+                lastData = '';
+                r.innerHTML = '等待扫码...';
+                document.getElementById('status').textContent = '扫码中...';
+            }, 100);
+        }, 5000);
     };
 
     document.getElementById('btn-cancel').onclick = function() {
@@ -180,7 +214,7 @@ function onCodeFound(codeData) {
 }
 
 function startCamera() {
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 640 } } })
     .then(function(s) {
         var v = document.getElementById('v');
         v.srcObject = s;
