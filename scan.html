@@ -16,7 +16,6 @@ video{width:100%;max-height:45vh;border-radius:8px;display:block}
 .status{color:#94a3b8;font-size:10px;margin:0 0 4px;flex-shrink:0}
 button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;min-width:72px}
 .btn-cancel{background:#6b7280}
-.btn-torch{background:#7c3aed;padding:6px 12px;font-size:12px;min-width:auto}
 .toolbar{display:none;justify-content:center;align-items:center;gap:6px;margin:2px 0;flex-wrap:wrap;flex-shrink:0}
 .toolbar label{color:#94a3b8;font-size:11px}
 .toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:11px;outline:none}
@@ -29,29 +28,10 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 <div class="video-wrap">
 <video id="v" autoplay playsinline></video>
 <canvas id="c" hidden></canvas>
-<div id="crop-overlay" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;border:2px solid rgba(74,222,128,0.6);border-radius:10px;display:none;box-sizing:border-box"></div>
 </div>
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
 <div class="toolbar" id="toolbar">
-<button id="btn-torch" class="btn-torch">💡 闪光灯</button>
-<button id="btn-snap" class="btn-torch">📸 拍照识别</button>
-<label>画幅:
-<select id="size-select">
-<option value="160">160px</option>
-<option value="240">240px</option>
-<option value="320" selected>320px</option>
-<option value="480">480px</option>
-</select>
-</label>
-<label>变焦:
-<select id="zoom-select">
-<option value="1.0">1x</option>
-<option value="1.5">1.5x</option>
-<option value="2.0">2x</option>
-<option value="3.0">3x</option>
-</select>
-</label>
 </div>
 <div class="actions-wrap">
 <div class="actions" id="actions">
@@ -70,9 +50,6 @@ var broker = 'wss://broker.emqx.io:8084/mqtt';
 var lastData = '';
 var scanTimer = null;
 var paused = false;
-var torchOn = false;
-var scanW = parseInt(localStorage.getItem('scanW') || '320');
-var zoom = parseFloat(localStorage.getItem('zoom') || '1.0');
 var zxingReady = false;
 var mqttReady = false;
 
@@ -102,67 +79,22 @@ mqttClient.on('connect', function () {
     mqttReady = true;
     document.getElementById('status').textContent = zxingReady ? '扫码中...' : 'MQTT 已连接';
     document.getElementById('toolbar').style.display = 'flex';
-    var sel = document.getElementById('size-select');
-    sel.value = '' + scanW;
-    sel.onchange = function() {
-        scanW = parseInt(this.value);
-        localStorage.setItem('scanW', '' + scanW);
-        document.getElementById('status').textContent = '画幅: ' + scanW + 'px';
-    };
-    var zsel = document.getElementById('zoom-select');
-    zsel.value = '' + zoom;
-    zsel.onchange = function() {
-        zoom = parseFloat(this.value);
-        localStorage.setItem('zoom', '' + zoom);
-        updateCropOverlay();
-        document.getElementById('status').textContent = '变焦: ' + zoom + 'x';
-    };
-    updateCropOverlay();
     tryStart();
-
-function updateCropOverlay() {
-    var ov = document.getElementById('crop-overlay');
-    if (zoom > 1.0) {
-        ov.style.display = 'block';
-        var pct = 100 / zoom;
-        var margin = (100 - pct) / 2;
-        ov.style.top = margin + '%';
-        ov.style.left = margin + '%';
-        ov.style.width = pct + '%';
-        ov.style.height = pct + '%';
-    } else {
-        ov.style.display = 'none';
-    }
-}
 });
 
-// 变焦裁剪: 取画面中心区域并放大，等同数码变焦
+// 从视频抓一帧交给 zxing-wasm 解码
+function grabAndScan() {
+
+// 从视频抓一帧交给 zxing-wasm 解码
 function grabAndScan() {
     var v = document.getElementById('v');
     var c = document.getElementById('c');
     var ctx = c.getContext('2d');
     if (v.readyState < 2) return;
-
-    var vw = v.videoWidth, vh = v.videoHeight;
-    var outW = Math.min(vw, scanW);
-    var outH = Math.round(outW * vh / vw);
-
-    if (zoom > 1.0) {
-        // 从视频中心截取 zoom 分之 1 的区域，再拉伸到 outW x outH
-        var cropW = Math.round(outW / zoom);
-        var cropH = Math.round(outH / zoom);
-        var sx = Math.round((vw - cropW) / 2);
-        var sy = Math.round((vh - cropH) / 2);
-        c.width = outW;
-        c.height = outH;
-        ctx.drawImage(v, sx, sy, cropW, cropH, 0, 0, outW, outH);
-    } else {
-        c.width = outW;
-        c.height = outH;
-        ctx.drawImage(v, 0, 0, outW, outH);
-    }
-
-    var img = ctx.getImageData(0, 0, outW, outH);
+    c.width = Math.min(v.videoWidth, 320);
+    c.height = Math.round(c.width * v.videoHeight / v.videoWidth);
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    var img = ctx.getImageData(0, 0, c.width, c.height);
     ZXingWASM.readBarcodes(img, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
         if (res.length > 0) onCodeFound(res[0].text);
     }).catch(function(err) {
@@ -184,16 +116,6 @@ function playBeep() {
         osc.start();
         osc.stop(ctx.currentTime + 0.3);
     } catch (e) {}
-}
-
-function toggleTorch() {
-    var v = document.getElementById('v');
-    if (!v || !v.srcObject) return;
-    var track = v.srcObject.getVideoTracks()[0];
-    if (!track || !track.applyConstraints) return;
-    torchOn = !torchOn;
-    track.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function() {});
-    document.getElementById('btn-torch').textContent = torchOn ? '💡 关闭' : '💡 闪光灯';
 }
 
 function onCodeFound(codeData) {
@@ -228,15 +150,17 @@ function onCodeFound(codeData) {
             lastData = '';
             r.innerHTML = '等待扫码...';
             document.getElementById('status').textContent = '扫码中...';
-        }, 1000);
+        }, 100);
     };
 
     document.getElementById('btn-cancel').onclick = function() {
         document.getElementById('actions').style.display = 'none';
-        paused = false;
-        document.getElementById('v').style.opacity = '1';
-        lastData = '';
-        r.innerHTML = '等待扫码...';
+        setTimeout(function() {
+            paused = false;
+            document.getElementById('v').style.opacity = '1';
+            lastData = '';
+            r.innerHTML = '等待扫码...';
+        }, 100);
     };
 
     document.getElementById('actions').style.display = 'block';
@@ -249,40 +173,6 @@ function startCamera() {
         v.srcObject = s;
         v.play();
 
-        document.getElementById('btn-torch').onclick = toggleTorch;
-        document.getElementById('btn-snap').onclick = function() {
-            document.getElementById('status').textContent = '识别中...';
-            // 停一下再抓，让画面稳定
-            setTimeout(function() {
-                var c2 = document.getElementById('c');
-                var ctx2 = c2.getContext('2d');
-                var v2 = document.getElementById('v');
-                var outW = Math.min(v2.videoWidth, scanW);
-                var outH = Math.round(outW * v2.videoHeight / v2.videoWidth);
-                if (zoom > 1.0) {
-                    var cropW = Math.round(outW / zoom);
-                    var cropH = Math.round(outH / zoom);
-                    var sx = Math.round((v2.videoWidth - cropW) / 2);
-                    var sy = Math.round((v2.videoHeight - cropH) / 2);
-                    c2.width = outW; c2.height = outH;
-                    ctx2.drawImage(v2, sx, sy, cropW, cropH, 0, 0, outW, outH);
-                } else {
-                    c2.width = outW; c2.height = outH;
-                    ctx2.drawImage(v2, 0, 0, outW, outH);
-                }
-                var img2 = ctx2.getImageData(0, 0, outW, outH);
-                ZXingWASM.readBarcodes(img2, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
-                    if (res.length > 0) {
-                        document.getElementById('status').textContent = '手动识别成功 ✓';
-                        onCodeFound(res[0].text);
-                    } else {
-                        document.getElementById('status').textContent = '未识别到码';
-                    }
-                }).catch(function(err) {
-                    document.getElementById('status').textContent = '识别失败';
-                });
-            }, 200);
-        };
         document.getElementById('status').textContent = '扫码中...';
 
         scanTimer = setInterval(function() {
