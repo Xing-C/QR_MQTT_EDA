@@ -29,11 +29,21 @@ button{background:#2563eb;color:#fff;border:none;padding:6px 16px;border-radius:
 <div class="status" id="status">连接中...</div>
 <div class="toolbar" id="toolbar">
 <button id="btn-torch" class="btn-torch">💡 闪光灯</button>
+<button id="btn-snap" class="btn-torch">📸 拍照识别</button>
 <label>画幅:
 <select id="size-select">
-<option value="160">小 (160px)</option>
-<option value="240">中 (240px)</option>
-<option value="320" selected>大 (320px)</option>
+<option value="160">160px</option>
+<option value="240">240px</option>
+<option value="320" selected>320px</option>
+<option value="480">480px</option>
+</select>
+</label>
+<label>变焦:
+<select id="zoom-select">
+<option value="1.0">1x</option>
+<option value="1.5">1.5x</option>
+<option value="2.0">2x</option>
+<option value="3.0">3x</option>
 </select>
 </label>
 </div>
@@ -53,21 +63,85 @@ var lastData = '';
 var scanTimer = null;
 var paused = false;
 var torchOn = false;
-var scanW = parseInt(localStorage.getItem('scanW') || '240');
+var scanW = parseInt(localStorage.getItem('scanW') || '320');
+var zoom = parseFloat(localStorage.getItem('zoom') || '1.0');
+var zxingReady = false;
+var mqttReady = false;
+
+// 等待 zxing-wasm 初始化（WASM 二进制加载需要时间）
+function waitZxing() {
+    if (typeof ZXingWASM !== 'undefined' && typeof ZXingWASM.readBarcodes === 'function') {
+        // 用 prepareZXingModule 确认 WASM 真正就绪
+        Promise.resolve(ZXingWASM.prepareZXingModule ? ZXingWASM.prepareZXingModule() : true).then(function() {
+            zxingReady = true;
+            document.getElementById('status').textContent = mqttReady ? '扫码中...' : '扫码引擎就绪';
+            tryStart();
+        }).catch(function(e) {
+            document.getElementById('r').textContent = '扫码引擎加载失败: ' + e.message;
+        });
+        return;
+    }
+    setTimeout(waitZxing, 500);
+}
+waitZxing();
+
+function tryStart() {
+    if (zxingReady && mqttReady) startCamera();
+}
 
 var mqttClient = mqtt.connect(broker);
 mqttClient.on('connect', function () {
-    document.getElementById('status').textContent = '已连接 ✓';
+    mqttReady = true;
+    document.getElementById('status').textContent = zxingReady ? '扫码中...' : 'MQTT 已连接';
     document.getElementById('toolbar').style.display = 'flex';
-    // 恢复记忆的画幅
     var sel = document.getElementById('size-select');
     sel.value = '' + scanW;
     sel.onchange = function() {
         scanW = parseInt(this.value);
         localStorage.setItem('scanW', '' + scanW);
     };
-    startCamera();
+    var zsel = document.getElementById('zoom-select');
+    zsel.value = '' + zoom;
+    zsel.onchange = function() {
+        zoom = parseFloat(this.value);
+        localStorage.setItem('zoom', '' + zoom);
+    };
+    tryStart();
 });
+
+// 变焦裁剪: 取画面中心区域并放大，等同数码变焦
+function grabAndScan() {
+    var v = document.getElementById('v');
+    var c = document.getElementById('c');
+    var ctx = c.getContext('2d');
+    if (v.readyState < 2) return;
+
+    var vw = v.videoWidth, vh = v.videoHeight;
+    var outW = Math.min(vw, scanW);
+    var outH = Math.round(outW * vh / vw);
+
+    if (zoom > 1.0) {
+        // 从视频中心截取 zoom 分之 1 的区域，再拉伸到 outW x outH
+        var cropW = Math.round(outW / zoom);
+        var cropH = Math.round(outH / zoom);
+        var sx = Math.round((vw - cropW) / 2);
+        var sy = Math.round((vh - cropH) / 2);
+        c.width = outW;
+        c.height = outH;
+        ctx.drawImage(v, sx, sy, cropW, cropH, 0, 0, outW, outH);
+    } else {
+        c.width = outW;
+        c.height = outH;
+        ctx.drawImage(v, 0, 0, outW, outH);
+    }
+
+    var img = ctx.getImageData(0, 0, outW, outH);
+    ZXingWASM.readBarcodes(img, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
+        if (res.length > 0) onCodeFound(res[0].text);
+    }).catch(function(err) {
+        console.log('[ZXing]', err);
+    });
+}
 
 function playBeep() {
     try {
@@ -145,23 +219,48 @@ function startCamera() {
     navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: 320 } })
     .then(function(s) {
         var v = document.getElementById('v');
-        var c = document.getElementById('c');
-        var ctx = c.getContext('2d');
         v.srcObject = s;
         v.play();
 
         document.getElementById('btn-torch').onclick = toggleTorch;
+        document.getElementById('btn-snap').onclick = function() {
+            document.getElementById('status').textContent = '识别中...';
+            // 停一下再抓，让画面稳定
+            setTimeout(function() {
+                var c2 = document.getElementById('c');
+                var ctx2 = c2.getContext('2d');
+                var v2 = document.getElementById('v');
+                var outW = Math.min(v2.videoWidth, scanW);
+                var outH = Math.round(outW * v2.videoHeight / v2.videoWidth);
+                if (zoom > 1.0) {
+                    var cropW = Math.round(outW / zoom);
+                    var cropH = Math.round(outH / zoom);
+                    var sx = Math.round((v2.videoWidth - cropW) / 2);
+                    var sy = Math.round((v2.videoHeight - cropH) / 2);
+                    c2.width = outW; c2.height = outH;
+                    ctx2.drawImage(v2, sx, sy, cropW, cropH, 0, 0, outW, outH);
+                } else {
+                    c2.width = outW; c2.height = outH;
+                    ctx2.drawImage(v2, 0, 0, outW, outH);
+                }
+                var img2 = ctx2.getImageData(0, 0, outW, outH);
+                ZXingWASM.readBarcodes(img2, { formats: ['QRCode', 'DataMatrix', 'Aztec', 'Code128', 'PDF417'], tryHarder: true }).then(function(res) {
+                    if (res.length > 0) {
+                        document.getElementById('status').textContent = '手动识别成功 ✓';
+                        onCodeFound(res[0].text);
+                    } else {
+                        document.getElementById('status').textContent = '未识别到码';
+                    }
+                }).catch(function(err) {
+                    document.getElementById('status').textContent = '识别失败';
+                });
+            }, 200);
+        };
         document.getElementById('status').textContent = '扫码中...';
 
         scanTimer = setInterval(function() {
             if (paused || v.readyState < 2) return;
-            c.width = Math.min(v.videoWidth, scanW);
-            c.height = Math.round(c.width * v.videoHeight / v.videoWidth);
-            ctx.drawImage(v, 0, 0, c.width, c.height);
-            var img = ctx.getImageData(0, 0, c.width, c.height);
-            ZXingWASM.readBarcodes(img, { formats: ['QRCode'] }).then(function(res) {
-                if (res.length > 0) onCodeFound(res[0].text);
-            }).catch(function() {});
+            grabAndScan();
         }, 50);
     })
     .catch(function(e) {
