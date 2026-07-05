@@ -16,7 +16,6 @@ video{width:100%;max-height:45vh;border-radius:8px;display:block}
 .status{color:#94a3b8;font-size:10px;margin:0 0 4px;flex-shrink:0}
 button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;min-width:72px}
 .btn-cancel{background:#6b7280}
-.toolbar{display:none;justify-content:center;align-items:center;gap:6px;margin:2px 0;flex-wrap:wrap;flex-shrink:0}
 .toolbar label{color:#94a3b8;font-size:11px}
 .toolbar select{background:#1e1e2e;color:#fff;border:1px solid #444;border-radius:4px;padding:3px 4px;font-size:11px;outline:none}
 .actions-wrap{flex:1;display:flex;align-items:flex-end;justify-content:center;padding:16px 0}
@@ -31,8 +30,6 @@ button{background:#2563eb;color:#fff;border:none;padding:10px 24px;border-radius
 </div>
 <div id="r" class="wait">等待扫码...</div>
 <div class="status" id="status">连接中...</div>
-<div class="toolbar" id="toolbar">
-</div>
 <div class="actions-wrap">
 <div class="actions" id="actions">
 <button id="btn-send">✓ 推送</button>
@@ -54,9 +51,9 @@ var zxingReady = false;
 var mqttReady = false;
 
 // 等待 zxing-wasm 初始化（WASM 二进制加载需要时间）
+var zxingTimeout = 0;
 function waitZxing() {
     if (typeof ZXingWASM !== 'undefined' && typeof ZXingWASM.readBarcodes === 'function') {
-        // 用 prepareZXingModule 确认 WASM 真正就绪
         Promise.resolve(ZXingWASM.prepareZXingModule ? ZXingWASM.prepareZXingModule() : true).then(function() {
             zxingReady = true;
             document.getElementById('status').textContent = mqttReady ? '扫码中...' : '扫码引擎就绪';
@@ -64,6 +61,12 @@ function waitZxing() {
         }).catch(function(e) {
             document.getElementById('r').textContent = '扫码引擎加载失败: ' + e.message;
         });
+        return;
+    }
+    zxingTimeout++;
+    if (zxingTimeout > 60) { // 30秒超时
+        document.getElementById('r').textContent = '扫码引擎加载超时，请刷新页面重试';
+        document.getElementById('status').textContent = '加载失败';
         return;
     }
     setTimeout(waitZxing, 500);
@@ -74,16 +77,26 @@ function tryStart() {
     if (zxingReady && mqttReady) startCamera();
 }
 
-var mqttClient = mqtt.connect(broker);
+var mqttClient = mqtt.connect(broker, { connectTimeout: 10000 });
+var mqttTimeout = setTimeout(function() {
+    if (!mqttReady) {
+        document.getElementById('r').textContent = 'MQTT 连接超时，请检查网络后刷新页面';
+        document.getElementById('status').textContent = '连接失败';
+    }
+}, 15000);
 mqttClient.on('connect', function () {
+    clearTimeout(mqttTimeout);
     mqttReady = true;
     document.getElementById('status').textContent = zxingReady ? '扫码中...' : 'MQTT 已连接';
-    document.getElementById('toolbar').style.display = 'flex';
     tryStart();
 });
-
-// 从视频抓一帧交给 zxing-wasm 解码
-function grabAndScan() {
+mqttClient.on('error', function() {
+    clearTimeout(mqttTimeout);
+    if (!mqttReady) {
+        document.getElementById('r').textContent = 'MQTT 连接失败，请刷新页面重试';
+        document.getElementById('status').textContent = '连接失败';
+    }
+});
 
 // 从视频抓一帧交给 zxing-wasm 解码
 function grabAndScan() {
